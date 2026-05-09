@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>品出しアシスタント</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <style id="auth-guard-style">
+  body.auth-loading > *:not(#auth-guard) { display: none !important; }
+  body.auth-required > *:not(#auth-guard) { display: none !important; }
+  #auth-guard {
+    position: fixed; inset: 0; z-index: 99999;
+    display: none;
+    align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", sans-serif;
+    padding: 20px;
+  }
+  body.auth-loading #auth-guard,
+  body.auth-required #auth-guard { display: flex; }
+  #auth-guard .card {
+    background: white; border-radius: 16px; padding: 32px 24px;
+    width: 100%; max-width: 360px; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+  #auth-guard h1 { font-size: 18px; color: #1e3a8a; margin: 0 0 8px 0; }
+  #auth-guard .subtitle { font-size: 13px; color: #64748b; margin-bottom: 24px; }
+  #auth-guard label { display: block; font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 8px; }
+  #auth-guard input[type="password"] {
+    width: 100%; padding: 12px 14px; border: 2px solid #e2e8f0; border-radius: 10px;
+    font-size: 16px; margin-bottom: 16px; box-sizing: border-box;
+  }
+  #auth-guard input[type="password"]:focus { outline: none; border-color: #3b82f6; }
+  #auth-guard button {
+    width: 100%; padding: 13px; background: #1e3a8a; color: white;
+    border: none; border-radius: 10px; font-size: 15px; font-weight: 600;
+    cursor: pointer;
+  }
+  #auth-guard button:disabled { background: #94a3b8; cursor: not-allowed; }
+  #auth-guard .error {
+    background: #fee2e2; color: #991b1b; padding: 10px 12px; border-radius: 8px;
+    font-size: 13px; margin-bottom: 16px;
+  }
+  #auth-guard .note {
+    margin-top: 20px; padding: 12px; background: #f1f5f9; border-radius: 8px;
+    font-size: 12px; color: #475569; line-height: 1.5;
+  }
+  #auth-guard .loading-msg {
+    text-align: center; color: white; font-size: 14px;
+  }
+</style>
+
+<div id="auth-guard">
+  <div id="auth-loading" class="loading-msg" style="display:none;">読み込み中...</div>
+  <div id="auth-card" class="card" style="display:none;">
+    <h1>🛒 品出しアシスタント Pro</h1>
+    <p class="subtitle">バイト先メンバー専用</p>
+    <div id="auth-error" class="error" style="display:none;"></div>
+    <label for="auth-pw">パスワード</label>
+    <input type="password" id="auth-pw" autocomplete="current-password" autofocus>
+    <button id="auth-submit">ログイン</button>
+    <div class="note">
+      💡 一度ログインすれば、30日間は再入力不要です。<br>
+      パスワードは LINE で共有されているものを入力してください。
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  // 起動時に認証チェック画面を強制表示（読み込み中状態）
+  document.body.classList.add('auth-loading');
+  document.getElementById('auth-loading').style.display = 'block';
+
+  function showLoginForm(errorMsg) {
+    document.body.classList.remove('auth-loading');
+    document.body.classList.add('auth-required');
+    document.getElementById('auth-loading').style.display = 'none';
+    document.getElementById('auth-card').style.display = 'block';
+    if (errorMsg) {
+      var err = document.getElementById('auth-error');
+      err.textContent = '⚠️ ' + errorMsg;
+      err.style.display = 'block';
+    }
+    setTimeout(function(){ document.getElementById('auth-pw').focus(); }, 50);
+  }
+
+  function unlockApp() {
+    document.body.classList.remove('auth-loading');
+    document.body.classList.remove('auth-required');
+    document.getElementById('auth-guard').style.display = 'none';
+  }
+
+  // 1. 認証Cookieが有効かサーバーに確認
+  fetch('/api/check', { method: 'GET', credentials: 'same-origin', cache: 'no-store' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data && data.authenticated) {
+        unlockApp();
+      } else {
+        showLoginForm();
+      }
+    })
+    .catch(function() {
+      showLoginForm('認証サーバーに接続できませんでした。リロードしてください。');
+    });
+
+  // 2. ログインボタン処理
+  function submitLogin() {
+    var pw = document.getElementById('auth-pw').value;
+    var btn = document.getElementById('auth-submit');
+    btn.disabled = true;
+    btn.textContent = '確認中...';
+
+    fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ password: pw })
+    })
+    .then(function(r) {
+      if (r.ok) {
+        // 認証成功 → リロードして再チェック（Cookieが効いていることを確認）
+        location.reload();
+      } else {
+        return r.json().then(function(d) { throw new Error(d.error || 'ログイン失敗'); });
+      }
+    })
+    .catch(function(e) {
+      var err = document.getElementById('auth-error');
+      err.textContent = '⚠️ ' + (e.message || 'パスワードが違います');
+      err.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'ログイン';
+      document.getElementById('auth-pw').value = '';
+      document.getElementById('auth-pw').focus();
+    });
+  }
+
+  document.getElementById('auth-submit').addEventListener('click', submitLogin);
+  document.getElementById('auth-pw').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') submitLogin();
+  });
+})();
+</script>
+  <header class="header" role="banner">
+    <nav class="tabs" role="navigation" aria-label="カテゴリ切替">
+      <!-- 左タブ：スワイプ/スクロール/タップで切替（右タブと重複しないようにループ） -->
+      <button id="tab-rotatable-left" class="tab rotatable-tab" data-tab="paper" data-side="left" aria-pressed="false" aria-label="左タブ：スワイプまたはスクロールで切替">
+        <span class="rotatable-arrow rotatable-arrow-up" aria-hidden="true">▲</span>
+        <span class="rotatable-label">紙類</span>
+        <span class="rotatable-arrow rotatable-arrow-down" aria-hidden="true">▼</span>
+      </button>
+      <!-- 右タブ：スワイプ/スクロール/タップで切替（左タブと重複しないようにループ） -->
+      <button id="tab-rotatable-right" class="tab rotatable-tab active" data-tab="drinks" data-side="right" aria-pressed="true" aria-label="右タブ：スワイプまたはスクロールで切替">
+        <span class="rotatable-arrow rotatable-arrow-up" aria-hidden="true">▲</span>
+        <span class="rotatable-label">飲料</span>
+        <span class="rotatable-arrow rotatable-arrow-down" aria-hidden="true">▼</span>
+      </button>
+      <nav class="sub-tabs" role="navigation" aria-label="表示切替">
+        <button id="subtab-products" class="subtab active" aria-pressed="true">商品</button>
+        <button id="subtab-tasks" class="subtab" aria-pressed="false">タスク</button>
+      </nav>
+    </nav>
+  </header>
+  <main class="main" role="main">
+    <div class="search-area">
+      <div class="settings-area">
+        <button id="settings-btn" class="settings-btn" title="設定" aria-label="設定"><span aria-hidden="true">⚙️</span></button>
+      </div>
+      <input type="search" id="search-box" placeholder="商品名で検索" autocomplete="off" aria-label="商品名検索">
+      <div id="filter-buttons" style="display:none; margin-left:8px;">
+        <!-- 飲料商品画面用：陳列場所フィルタ -->
+        <div id="drinks-loc-buttons" style="display:none;">
+          <button class="filter-btn drinks-loc-btn active" data-loc="all">全て</button>
+          <button class="filter-btn drinks-loc-btn" data-loc="冷通常飲料">冷通常飲料</button>
+          <button class="filter-btn drinks-loc-btn" data-loc="冷大型飲料">冷大型飲料</button>
+          <button class="filter-btn drinks-loc-btn" data-loc="通常大型飲料">通常大型飲料</button>
+          <button class="filter-btn drinks-loc-btn" data-loc="通常飲料棚">通常飲料棚</button>
+          <button class="filter-btn drinks-loc-btn" data-loc="エンド中央">エンド中央</button>
+          <button class="filter-btn drinks-loc-btn" data-loc="トマト棚">トマト棚</button>
+        </div>
+        <!-- 紙タスク画面用：カテゴリフィルタ -->
+        <div id="paper-cat-buttons" style="display:none;">
+          <button class="filter-btn paper-cat-btn active" data-cat="all">全て</button>
+          <button class="filter-btn paper-cat-btn" data-cat="キッチン">キッチン</button>
+          <button class="filter-btn paper-cat-btn" data-cat="ティッシュ">ティッシュ</button>
+          <button class="filter-btn paper-cat-btn" data-cat="トイレットペーパー">トイレットペーパー</button>
+        </div>
+        <!-- 日配商品画面・タスク画面用：カテゴリフィルタ -->
+        <div id="dailyfoods-cat-buttons" style="display:none;">
+          <button class="filter-btn dailyfoods-cat-btn active" data-cat="all">全て</button>
+          <button class="filter-btn dailyfoods-cat-btn" data-cat="常温飲料">常温飲料</button>
+          <button class="filter-btn dailyfoods-cat-btn" data-cat="常温ゼリー">常温ゼリー</button>
+          <button class="filter-btn dailyfoods-cat-btn" data-cat="卵">卵</button>
+        </div>
+      </div>
+    </div>
+    <section id="product-list" class="product-list" aria-label="商品一覧"></section>
+    <section id="task-list" class="task-list" style="display:none" aria-label="タスク一覧"></section>
+    <section id="chatbot-area" style="display:none" aria-label="チャットサポート">
+      <button id="close-chatbot-btn" aria-label="商品一覧に戻る">商品一覧に戻る</button>
+      <iframe
+
+      src="https://udify.app/chatbot/pc59V33QbQFkT2nh"
+      style="width: 100%; height: 100%; min-height: 700px"
+      frameborder="0"
+      allow="microphone">
+    </iframe>
+    </section>
+    <!-- 仕事マニュアルエリア -->
+    <section id="manual-area" style="display:none" aria-label="業務マニュアル">
+      <div class="manual-header">
+        <h2 class="manual-title">📖 ドライ仕事マニュアル</h2>
+        <div class="manual-header-buttons">
+          <a href="バイトマニュアル.pdf" target="_blank" class="manual-pdf-link">PDF版を開く</a>
+          <button id="close-manual-btn" class="close-manual-btn" aria-label="閉じる">✕</button>
+        </div>
+      </div>
+      <div class="manual-content">
+        <!-- 基本ルール -->
+        <details class="manual-section" open>
+          <summary class="manual-section-title">基本ルール</summary>
+          <div class="manual-section-body">
+            <ul>
+              <li>先入れ先出しを徹底する</li>
+              <li>日付チェックを行う（紙・ゴミ袋以外。ハーフカート内、オリコン・棚上、売り場全て）</li>
+              <li>前出しは「見やすく、選びやすく、手に取りやすく」を意識する</li>
+              <li>左から右へ最低2列＋フェイスアップ、上から下へ配置する</li>
+              <li>コープの日前日は、コープ商品をめいっぱい入れる</li>
+            </ul>
+          </div>
+        </details>
+        <!-- 飲料 -->
+        <details class="manual-section">
+          <summary class="manual-section-title">🥤 飲料</summary>
+          <div class="manual-section-body">
+            <h4>補充手順</h4>
+            <ol>
+              <li><strong>オリコン処理</strong>: バックヤードから出し、入る分を補充する。通路の邪魔にならない場所に適宜工夫して配置</li>
+              <li><strong>棚上整理</strong>: ストックを優先的に下ろして売り場を埋め、一度簡単に前出しをしてから次の作業へ</li>
+              <li><strong>補充メモ</strong>:
+                <ul>
+                  <li>500ml: 残り3列未満をメモする（よく売れる商品や棚の1番下などは、箱半分入るなら入れる。例：綾鷹、午後ティーなど）</li>
+                  <li>1.5L/2L: 空き3個以上、または売り場が2列のものは、全体的に満タンに入れる</li>
+                </ul>
+                <div class="manual-tip">💡 <strong>メモのコツ</strong>: 商品名ではなく、ボトルの周りについているラベルのデザインを見てメモを取る。バックヤードでデザインを一致させる方が圧倒的に早い。バックヤードにある在庫のハーフカートごとにメモを取る</div>
+              </li>
+              <li><strong>積み込み・陳列</strong>:
+                <ul>
+                  <li>冷蔵庫付近、水産裏（紙カートの反対側）、検収室裏などを確認する</li>
+                  <li>日付が前後していることもあるのでチェックして積み込む</li>
+                  <li>基本的にバラして補充OK（※特茶など「おまけ付き」はバラさない）</li>
+                </ul>
+              </li>
+              <li><strong>その他飲料の補充</strong>:
+                <ul>
+                  <li>野菜ジュース、トマトジュース、コーヒーも補充する</li>
+                  <li>月山の水同様、エンド・定番・コーナーにあるものの補充を行う</li>
+                  <li>底上げだけでなく、空箱があれば箱ごとの補充も行う</li>
+                </ul>
+              </li>
+              <li><strong>完了処理</strong>:
+                <ul>
+                  <li>余りは棚上かオリコンへ戻す</li>
+                  <li>前出し棒は必ず棚の上の所定の位置に戻す</li>
+                </ul>
+              </li>
+              <li><strong>在庫整理</strong>: 検収室裏の在庫整理を行う
+                <ul>
+                  <li>バックヤードのハーフカートに載せれるだけ載せる</li>
+                  <li>余ったハーフカートは外の置き場に分解して片付ける</li>
+                </ul>
+              </li>
+            </ol>
+            <h4>ホット飲料・レジ横</h4>
+            <ul>
+              <li>補充時に「2週間後」のラベルを貼る</li>
+              <li>期限が当日・翌日の場合: 値引き機を使用して50%割引処理を行い、売り切る</li>
+              <li>ラベラーのラベル交換: ①上→下→中の3箇所の黒パーツを外す ②新しいラベルを上から通してセットする</li>
+              <li>レジ横は業者の方がやってくれるが、定番の商品がない時はここから補充する。底上げ、前出しは行う</li>
+            </ul>
+            <h4>酒フォロー</h4>
+            <ul>
+              <li>ナイトマネージャー不在時に1.5〜2時間おきにチェックし、基本は前出しを行う</li>
+              <li>在庫ないものは6缶パックの商品からバラして出してOK</li>
+            </ul>
+            <h4>ワンデー・スーパー朝市の時</h4>
+            <ul>
+              <li>菓子、コーヒーの所にある飲料は売れるので適宜補充、底上げを行う</li>
+            </ul>
+          </div>
+        </details>
+        <!-- 日配 -->
+        <details class="manual-section">
+          <summary class="manual-section-title">🧊 日配（洋日配→和日配→卵・パン）</summary>
+          <div class="manual-section-body">
+            <h4>日配基本ルール</h4>
+            <ul>
+              <li>セール品、広告掲載品はチェックして都度在庫出しを行う（順番変動あり、臨機応変に対応する）</li>
+              <li>牛乳・卵・豆腐・納豆・ヨーグルトを重点的にチェックする</li>
+              <li>ハーフカート内、売り場の日付を常にチェックしながら行う</li>
+              <li>売り切り商品、供給期限撤去もれ、見落とし、陳列の日付がバラバラなこと（先入れ先出しになっていない、陳列ルールが守られてない）が多いので、見つけ次第対応する</li>
+            </ul>
+            <h4>冷蔵庫配置と陳列</h4>
+            <ul>
+              <li>左側＝洋日配、右側＝和日配</li>
+              <li>売り場（定番）: 賞味期限の早い（古い）ものを置く</li>
+              <li>平台: 賞味期限の遅い（新しい）ものを置く</li>
+              <li>※牛乳や果汁100%などのチルドカップ飲料等は日付が違ってもめいっぱい入れる ※鈴木チーフのやり方</li>
+            </ul>
+            <h4>値引き・片付け</h4>
+            <div class="manual-highlight">
+              <strong>17:30</strong> — 30%引き（菓子パン・デザート）<br>
+              漏れを見つけた時の食パンは30%、和菓子は20％、和日配担当の方不在時は平台の商品を50%引きにする。前の担当者が20％引きにしてる場合もあるので、売れ行きも見ておく
+            </div>
+            <div class="manual-highlight">
+              <strong>19:30</strong> — 50%引き（菓子パン、デザートなど全て）
+            </div>
+            <div class="manual-highlight">
+              <strong>20:30〜21:00</strong> — 最終値引き（60〜70%）。最大80%まで可
+            </div>
+            <div class="manual-warning">⚠️ <strong>重要</strong>: 同一金額でも、商品種類（JANコード）ごとにスキャンをして値引く</div>
+            <ul>
+              <li>商品名、賞味期限、アレルギー表示にかぶらないよう、バーコードの縦線1ヶ所が消えるように値引きシールを貼る</li>
+            </ul>
+            <h4>かご整理</h4>
+            <ul>
+              <li>牛乳、白バット（COOP）、その他の種類ごとに重ねて片付ける。黄色バットは銀色の扉つきの台車に入れる</li>
+            </ul>
+          </div>
+        </details>
+        <!-- 食品・菓子 -->
+        <details class="manual-section">
+          <summary class="manual-section-title">🍪 食品・菓子</summary>
+          <div class="manual-section-body">
+            <ul>
+              <li>カテゴリー割引がある時はカテ割の棚上、前出しから行う（品薄の時は在庫出しも行う）</li>
+            </ul>
+            <h4>1. 棚上在庫を下ろす</h4>
+            <ul>
+              <li>商品の下に違う商品、奥に隠れてる商品、点在している商品が多いので整理整頓しながら行う（土日月は特に念入りに行う）</li>
+            </ul>
+            <h4>2. 品出し</h4>
+            <ul>
+              <li>バックヤードのカップ麺から油類までのハーフカートの範囲</li>
+              <li><strong>順番</strong>: ハーフカート内オリコン → ハーフカート内段ボール箱 → 在庫置き場の箱（冷蔵庫側、検収室裏、出入口にもあることも）</li>
+            </ul>
+            <h4>注意点</h4>
+            <div class="manual-warning">⚠️ <strong>重要</strong>: 棚上、オリコン、売り場での同一商品の日付がバラバラな時は、1番古い（賞味期限が早い）ものを売り場に陳列し直す</div>
+            <div class="manual-warning">⚠️ <strong>重要</strong>: カップ麺は最初と最後チェックして在庫出し、底上げを行い、エンドも満タンにする</div>
+            <ul>
+              <li>お米は指示があった時だけ検収室裏から補充する</li>
+              <li>雑穀などはオリコン内、箱ともにチェックして出す。米エンド脇にあるもち麦の底上げも行う</li>
+              <li>菓子（ポッキーなどの箱）、パスタソース、ふりかけなどの外箱は中身が3ヶ位になったら捨てて前出しする</li>
+            </ul>
+          </div>
+        </details>
+        <!-- 冷食・アイス -->
+        <details class="manual-section">
+          <summary class="manual-section-title">🍦 冷食・アイス</summary>
+          <div class="manual-section-body">
+            <h4>開始前</h4>
+            <ul>
+              <li>平台補充の禁止指示（ノート・口頭）がないか必ず確認する</li>
+              <li>アイス担当になったら氷も担当する</li>
+              <li>アイスソーダ、フローズンヨーグルト、スーパーカップ、うずまきソフトは賞味期限に注意する</li>
+            </ul>
+            <h4>仕事内容</h4>
+            <ul>
+              <li>入荷分のハーフカートがある時は、在庫のハーフカートを出してから入荷分を出す。めいっぱい入れて良い</li>
+            </ul>
+            <h4>冷凍庫整理</h4>
+            <ul>
+              <li>在庫をまとめ（在庫ハーフカート内の整理整頓を行う）</li>
+              <li>入荷で入ってきた分のハーフカートは外の置き場に片付ける</li>
+            </ul>
+            <div class="manual-warning">⚠️ <strong>鉄則</strong>: ロードラインを越えない／扉を閉める／賞味期限を守る</div>
+            <h4>注意点</h4>
+            <ul>
+              <li>冷食の肉は別部門のため触らない</li>
+            </ul>
+          </div>
+        </details>
+        <!-- 紙類・ゴミ袋 -->
+        <details class="manual-section">
+          <summary class="manual-section-title">🧻 紙類・ゴミ袋</summary>
+          <div class="manual-section-body">
+            <ul>
+              <li>品薄商品をメモし（どれがいくつ必要か）</li>
+              <li>バックヤードから持ってきて補充する（HOT飲料の隣、検収室裏もチェックする）</li>
+            </ul>
+            <div class="manual-warning">⚠️ <strong>★重要</strong>: セールの時、広告掲載商品は1度ではなく何度もチェックして補充する</div>
+            <ul>
+              <li>品切れポップが置いてある商品でも見落としていることがあるので一通りチェックする</li>
+            </ul>
+          </div>
+        </details>
+        <!-- 入荷 -->
+        <details class="manual-section">
+          <summary class="manual-section-title">📦 入荷</summary>
+          <div class="manual-section-body">
+            <h4>仕事内容</h4>
+            <ul>
+              <li>入荷分の賞味期限が売り場商品より古い時もあるので常にチェックしながら出す</li>
+              <li>箱を開けたら残りは棚上に置く</li>
+            </ul>
+            <h4>片付け</h4>
+            <ul>
+              <li>オリコン外側に入ってる白い紙は捨てる</li>
+              <li>オリコンをまとめて外の置き場へ持っていき、ブルーシートとフックをかける</li>
+              <li>ハーフカートはストッパーをかける</li>
+            </ul>
+          </div>
+        </details>
+        <!-- ゴミ捨て -->
+        <details class="manual-section">
+          <summary class="manual-section-title">🗑️ ゴミ捨て</summary>
+          <div class="manual-section-body">
+            <h4>赤い台車</h4>
+            <ul>
+              <li>ダンボールの捨て場</li>
+              <li>台車ごとバック（か外）へ運び、外から新しい台車を持ち込み組み立て、ストッパーをかける</li>
+            </ul>
+            <h4>紙ゴミ</h4>
+            <ul>
+              <li>ティッシュが入っていた空ダンボールを組み立てる</li>
+              <li>底を十字に、上部をガムテープで固定してゴミ箱として使う</li>
+            </ul>
+            <h4>袋の交換</h4>
+            <ul>
+              <li><strong>白色（燃えるゴミ）</strong>: 2回縛って生ごみ置き場へ。新しい袋は段ボール奥から</li>
+              <li><strong>黄色（プラゴミ）</strong>: 外の置き場に捨てる。検収室扉付近から新しい袋を取る</li>
+            </ul>
+            <p>ダンボール以外、他部門のゴミもここに捨てられるので、適宜対応する</p>
+          </div>
+        </details>
+        <!-- 端末操作・内線・その他 -->
+        <details class="manual-section">
+          <summary class="manual-section-title">📱 端末操作・内線・その他</summary>
+          <div class="manual-section-body">
+            <p>終わったら充電して終了する</p>
+            <h4>キーエンス操作</h4>
+            <div class="manual-tip">起動：電源 → 循環式 → 11327 → 日付変更（1週間後） → 全体 → 絞り込み → 日付未登録を外す → アラート</div>
+            <ul>
+              <li>古い期限をスキャンし、「元の金額部分」にチェックを入れて販売済みへ。在庫なしなら欠品処理を行う</li>
+              <li>※日付がスキャンできない場合は、手動で入力できます</li>
+              <li>廃棄と値引きを分けてホワイトボード下のオリコンに入れる</li>
+            </ul>
+            <h4>無線機（金額調べ）</h4>
+            <ul>
+              <li>事務室で起動し、売価チェックでスキャン</li>
+              <li>右側が税抜実売価格</li>
+            </ul>
+            <h4>内線</h4>
+            <ul>
+              <li>番号を押して受話器を取る</li>
+              <li>例: ナイトマネージャーは <strong>211</strong></li>
+              <li>例: ドライチーフは <strong>206</strong></li>
+            </ul>
+            <h4>POP作り</h4>
+            <ul>
+              <li>左から順にLB8、LB7、LB6、下にLB5の用紙が入ってる</li>
+              <li>この機械で実売価格も確認できるので、急ぎの場合は使う</li>
+            </ul>
+            <div class="manual-tip">手順: 裏返しにして、緑の線を右側にしてプリンターに置く → バーコード検索から商品をスキャン → LB〇のカードを選択して印刷</div>
+            <h4>商品の廃棄</h4>
+            <p><strong>廃棄</strong>（賞味期限切れの商品）</p>
+            <div class="manual-tip">値下発行 → 廃棄 → 個数 → スキャン → 電源オフ</div>
+            <p><strong>雑損</strong>（予期せぬトラブルの商品：店員による破損、お客様による破損、その他）</p>
+            <ul>
+              <li>検収室の机の上に置くだけ（心配ならホワイトボードにメモ）</li>
+            </ul>
+          </div>
+        </details>
+      </div>
+    </section>
+    <section id="instruction-area" style="display:none" aria-label="取扱説明書">
+      <div class="manual-header">
+        <h2 class="manual-title">🛠️ 取扱説明書</h2>
+        <div class="manual-header-buttons">
+          <a href="取扱説明書.pdf" target="_blank" class="manual-pdf-link">PDF版を開く</a>
+          <button id="close-instruction-btn" class="close-manual-btn" aria-label="閉じる">✕</button>
+        </div>
+      </div>
+      <div class="manual-content">
+        <section class="instruction-overview" aria-label="取扱説明書の概要">
+          <article class="instruction-card">
+            <span class="instruction-card-icon" aria-hidden="true">🛒</span>
+            <h3>商品画面</h3>
+            <p>商品画像を押してタスク追加、検索や陳列場所フィルタで必要な商品を絞り込めます。</p>
+          </article>
+          <article class="instruction-card">
+            <span class="instruction-card-icon" aria-hidden="true">📋</span>
+            <h3>タスク画面</h3>
+            <p>追加した商品を運搬済・未運搬・削除で整理できます。飲料と紙類で表示方法が一部異なります。</p>
+          </article>
+          <article class="instruction-card">
+            <span class="instruction-card-icon" aria-hidden="true">⚙️</span>
+            <h3>設定メニュー</h3>
+            <p>右上の設定から、マニュアル、取扱説明書、チャットサポート、タスクリセット、ダークモード切替を行います。</p>
+          </article>
+        </section>
+        <details class="manual-section" open>
+          <summary class="manual-section-title">基本の使い方</summary>
+          <div class="manual-section-body">
+            <div class="instruction-steps">
+              <div class="instruction-step">
+                <span class="instruction-step-number">1</span>
+                <div>
+                  <strong>上段タブでカテゴリを選ぶ</strong>
+                  <p>「飲料」「紙類」を押すと表示データが切り替わります。初期表示は飲料です。</p>
+                </div>
+              </div>
+              <div class="instruction-step">
+                <span class="instruction-step-number">2</span>
+                <div>
+                  <strong>下段タブで画面を切り替える</strong>
+                  <p>「商品」で商品一覧、「タスク」で追加済み商品一覧を表示します。</p>
+                </div>
+              </div>
+              <div class="instruction-step">
+                <span class="instruction-step-number">3</span>
+                <div>
+                  <strong>必要な商品を登録して管理する</strong>
+                  <p>商品画面でタスクを追加し、タスク画面で進捗を更新します。迷った時は上のPDF版も確認できます。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
+        <details class="manual-section">
+          <summary class="manual-section-title">商品画面の使い方</summary>
+          <div class="manual-section-body">
+            <div class="manual-tip">商品画像を短く押すと、その商品がタスクに1件追加されます。追加数は商品カード内に即時反映されます。</div>
+            <ul>
+              <li>検索欄では商品名で絞り込みできます。飲料タスク画面では検索も反映されます</li>
+              <li>飲料の「商品」画面では、陳列場所フィルタで棚の場所ごとに表示を切り替えられます</li>
+              <li>紙類の「商品」画面ではフィルタは表示されず、一覧から直接追加します</li>
+              <li>商品画像を長押しするとGoogle検索が開きます。画像確認したい時に使います</li>
+              <li>飲料で在庫無にした商品は商品一覧で薄く表示され、通常操作できなくなります</li>
+            </ul>
+          </div>
+        </details>
+        <details class="manual-section">
+          <summary class="manual-section-title">タスク画面の使い方</summary>
+          <div class="manual-section-body">
+            <div class="manual-highlight">飲料タスクはカテゴリごと、紙類タスクは同一商品をまとめて表示します。運搬済商品は下部にまとまります。</div>
+            <ul>
+              <li>「運搬済」ボタンを押すと、その商品は運搬済商品欄へ移動します</li>
+              <li>飲料の「未運搬」ボタンは未運搬欄へ移動します。未運搬欄で再度押すと在庫無として扱われます</li>
+              <li>飲料の在庫無商品は「タスクに戻す」で元の件数ぶんタスクへ復元できます</li>
+              <li>紙類タスクの「運搬済」は1回押すごとに1件分だけ進み、件数表示が更新されます</li>
+              <li>「削除」はそのタスク、または紙類では同一商品のまとまりごと削除します</li>
+            </ul>
+          </div>
+        </details>
+        <details class="manual-section">
+          <summary class="manual-section-title">各ボタンの動作</summary>
+          <div class="manual-section-body">
+            <h4>上部操作</h4>
+            <ul>
+              <li>「飲料」「紙類」: 表示カテゴリを切り替え、フィルタ状態も初期化します</li>
+              <li>「商品」「タスク」: 商品一覧とタスク一覧を切り替えます</li>
+              <li>右上の設定ボタン: 設定メニューを開きます</li>
+            </ul>
+            <h4>設定メニュー内</h4>
+            <ul>
+              <li>「ダークモード」: 画面配色を切り替え、状態を保存します</li>
+              <li>「チャットサポート(開発途中)」: チャット画面を開きます</li>
+              <li>「業務マニュアル」: 業務マニュアル画面を開きます</li>
+              <li>「取扱説明書」: この取扱説明書画面を開きます</li>
+              <li>「タスクリセット」: 登録済みタスクと在庫無情報を消去します</li>
+            </ul>
+            <h4>補助ボタン</h4>
+            <ul>
+              <li>各マニュアル画面の「PDF版を開く」: 対応するPDFファイルを新しいタブで開きます</li>
+              <li>各画面の「✕」: 商品一覧の初期状態へ戻ります</li>
+              <li>右下の「↑」: ページ上部へスクロールします</li>
+            </ul>
+          </div>
+        </details>
+        <details class="manual-section">
+          <summary class="manual-section-title">補足と注意点</summary>
+          <div class="manual-section-body">
+            <div class="manual-warning">タスクリセットを押すと、現在のタスク一覧と在庫無情報が消えます。操作前に必要な確認をしてください。</div>
+            <ul>
+              <li>紙類のタスク画面では検索欄は表示されず、カテゴリフィルタのみ使えます</li>
+              <li>チャットサポート、業務マニュアル、取扱説明書を開いている間は通常の商品一覧は非表示になります</li>
+              <li>さらに細かい仕様確認が必要な場合は、上部の「PDF版を開く」から正式版を参照してください</li>
+            </ul>
+          </div>
+        </details>
+      </div>
+    </section>
+    <!-- 日配 賞味期限入力モーダル -->
+    <div id="expiry-modal" class="expiry-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="expiry-modal-title">
+      <div class="expiry-modal-content">
+        <div class="expiry-modal-header">
+          <img id="expiry-modal-img" src="" alt="">
+          <div>
+            <h2 id="expiry-modal-title" class="expiry-modal-title">賞味期限</h2>
+            <div id="expiry-modal-name" class="expiry-modal-name"></div>
+          </div>
+        </div>
+        <label for="expiry-input" class="expiry-modal-label">月日 (例: 9月14日 → 0914)</label>
+        <input type="tel" id="expiry-input" class="expiry-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="MMDD" autocomplete="off">
+        <div id="expiry-modal-error" class="expiry-modal-error" style="display:none;"></div>
+        <div class="expiry-modal-buttons">
+          <button id="expiry-add-btn" class="expiry-add-btn">タスクに追加</button>
+          <button id="expiry-skip-btn" class="expiry-skip-btn">入力なしで追加</button>
+          <button id="expiry-cancel-btn" class="expiry-cancel-btn">キャンセル</button>
+        </div>
+      </div>
+    </div>
+    <div id="settings-modal" class="settings-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="settings-modal-content">
+        <h2 id="settings-title" class="settings-modal-title">設定</h2>
+        <div class="theme-toggle-area" style="margin-bottom:1.2rem;">
+          <label for="theme-toggle" style="font-weight:600; color:#2563eb; margin-right:0.7rem;">ダークモード</label>
+          <input type="checkbox" id="theme-toggle" style="width:1.2em; height:1.2em; vertical-align:middle;">
+        </div>
+        <button id="chatbot-btn" class="reset-btn" aria-label="チャットサポート">チャットサポート(開発途中)</button>
+        <button id="manual-btn" class="manual-btn" aria-label="マニュアル">業務マニュアル</button>
+        <button id="instruction-btn" class="manual-btn instruction-btn" aria-label="取扱説明書">取扱説明書</button>
+        <button id="reset-btn" class="reset-btn" aria-label="タスクリセット">タスクリセット</button>
+        <div class="settings-modal-logo">
+          <img src="KUTSUZAWA_rogo.jpg" alt="KUTSUZAWAロゴ" loading="lazy">
+        </div>
+        <button id="close-settings" class="close-settings" aria-label="閉じる">閉じる</button>
+      </div>
+    </div>
+  </main>
+  <button id="scrollTopBtn" class="scroll-top-btn" title="ページトップへ戻る" aria-label="ページトップへ"><span aria-hidden="true">↑</span></button>
+  <script src="script.js"></script>
+</body>
+</html>

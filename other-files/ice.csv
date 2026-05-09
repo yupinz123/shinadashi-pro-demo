@@ -1,0 +1,4 @@
+﻿id,name,imageUrl,category,location,Count,tasks,order
+i1,しずく クラッシュアイス1kg,images/6d033de496.svg,氷,アイス,1,,0
+i2,サンサン 氷キューブ1.1kg,images/a3d8bce924.svg,氷,アイス,0,,1
+i3,ひまわり ロックアイス1kg,images/fc4844307e.svg,氷,アイス,12,,2
