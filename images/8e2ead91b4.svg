@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <rect width="120" height="120" rx="8" fill="#dcfce7"/>
+  <rect x="30" y="40" width="60" height="40" rx="5" fill="#22c55e" opacity="0.85"/><path d="M50 40 Q60 25 70 40" fill="white" opacity="0.85"/>
+  <text x="60" y="108" font-family="-apple-system, sans-serif" font-size="11" font-weight="600" fill="#166534" text-anchor="middle">めぐみ ベビーテ…</text>
+</svg>
